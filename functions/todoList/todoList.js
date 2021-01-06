@@ -1,0 +1,93 @@
+const { ApolloServer, gql } = require('apollo-server-lambda')
+
+const faunadb = require("faunadb")
+q = faunadb.query
+require("dotenv").config()
+
+const typeDefs = gql `
+  type Query {
+    todos: [Todo]
+  }
+  type Mutation {
+    addTask(text: String): Todo
+    updateTask(text:String):Todo
+    delTask(id: ID!): Todo
+  }
+  type Todo {
+    id: ID!
+    text: String!
+  }
+`
+const client = new faunadb.Client({
+    secret: process.env.DB_SECRET,
+})
+
+const resolvers = {
+    Query: {
+        todos: async() => {
+            try {
+                const result = await client.query(
+                    q.Map(
+                        q.Paginate(q.Documents(q.Collection("todos"))),
+                        q.Lambda(x => q.Get(x))
+                    )
+                )
+                const data = result.data.map(t => {
+                    return {
+                        id: t.ref.id,
+                        text: t.data.text,
+                    }
+                })
+                return data
+            } catch (error) {
+                console.log(error)
+                return error.toString()
+            }
+        },
+    },
+
+    Mutation: {
+        addTask: async(_, { text }) => {
+            try {
+                const result = await client.query(
+                    q.Create(q.Collection("todos"), { data: { text: text } })
+                )
+                console.log(result.ref.id)
+                return result.data
+            } catch (error) {
+                return error.toString()
+            }
+        },
+        updateTask: async(_, { text }) => {
+            try {
+                const result = await client.query(
+                    q.Update(q.Collection("todos"), { data: { text: text } })
+                )
+                console.log(result.ref.id)
+                return result.data
+            } catch (error) {
+                return error.toString()
+            }
+        },
+        delTask: async(_, { id }) => {
+            try {
+                const newId = JSON.stringify(id)
+                console.log(newId)
+                const result = await client.query(
+                    q.Delete(q.Ref(q.Collection("todos"), id))
+                )
+                return result.data
+            } catch (error) {
+                return error
+            }
+        },
+    },
+}
+const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+})
+
+const handler = server.createHandler()
+
+module.exports = { handler }
